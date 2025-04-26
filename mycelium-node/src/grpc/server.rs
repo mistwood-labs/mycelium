@@ -1,6 +1,9 @@
-use crate::grpc::proto::mycelium_grpc::mycelium_service_server::{
-    MyceliumService, MyceliumServiceServer,
+use crate::grpc::proto::mycelium_grpc::{
+    mycelium_service_server::{MyceliumService, MyceliumServiceServer},
+    CopyRequest, CopyResponse, EchoRequest, EchoResponse,
 };
+use tonic::{Request, Response, Status};
+
 use anyhow::Result;
 use std::net::SocketAddr;
 use tonic::transport::Server;
@@ -12,28 +15,30 @@ pub struct MyceliumServiceImpl;
 impl MyceliumService for MyceliumServiceImpl {
     async fn copy_post(
         &self,
-        _request: tonic::Request<crate::grpc::proto::mycelium_grpc::CopyRequest>,
-    ) -> Result<tonic::Response<crate::grpc::proto::mycelium_grpc::CopyResponse>, tonic::Status>
-    {
-        Ok(tonic::Response::new(
-            crate::grpc::proto::mycelium_grpc::CopyResponse {
-                success: true,
-                message: "Copy successful".to_string(),
-            },
-        ))
+        request: Request<CopyRequest>,
+    ) -> Result<Response<CopyResponse>, Status> {
+        println!("Received CopyPost request: {:?}", request);
+
+        // TODO
+
+        Ok(Response::new(CopyResponse {
+            success: true,
+            message: "Copy successful".to_string(),
+        }))
     }
 
     async fn echo_post(
         &self,
-        _request: tonic::Request<crate::grpc::proto::mycelium_grpc::EchoRequest>,
-    ) -> Result<tonic::Response<crate::grpc::proto::mycelium_grpc::EchoResponse>, tonic::Status>
-    {
-        Ok(tonic::Response::new(
-            crate::grpc::proto::mycelium_grpc::EchoResponse {
-                success: true,
-                message: "Echo successful".to_string(),
-            },
-        ))
+        request: Request<EchoRequest>,
+    ) -> Result<Response<EchoResponse>, Status> {
+        println!("Received EchoPost request: {:?}", request);
+
+        // TODO
+
+        Ok(Response::new(EchoResponse {
+            success: true,
+            message: "Echo successful".to_string(),
+        }))
     }
 }
 
