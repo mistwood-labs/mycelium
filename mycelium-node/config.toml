@@ -1,3 +1,0 @@
-grpc_port = 50051
-p2p_port = 4001
-peer_key_path = "keys/peer.key"
