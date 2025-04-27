@@ -1,4 +1,7 @@
 pub mod ffi;
 pub mod node;
 
-pub use node::start;
+#[no_mangle]
+pub extern "C" fn start_node() {
+    node::start_node();
+}
