@@ -12,7 +12,7 @@ use libp2p::{
     tcp, websocket, yamux, Multiaddr, PeerId, Transport,
 };
 
-pub async fn start_p2p_node() -> Result<()> {
+pub async fn start() -> Result<()> {
     let id_keys = identity::Keypair::generate_ed25519();
     let peer_id = PeerId::from(id_keys.public());
     println!("Local peer id: {:?}", peer_id);
