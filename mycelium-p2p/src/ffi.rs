@@ -1,4 +1,5 @@
 use std::ffi::CStr;
+use std::ffi::CString;
 use std::os::raw::c_char;
 use std::sync::{Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
@@ -9,7 +10,7 @@ static NODE_THREAD: OnceLock<Mutex<Option<JoinHandle<()>>>> = OnceLock::new();
 
 #[no_mangle]
 pub extern "C" fn mycelium_p2p_node_start(listen_addr: *const c_char) -> bool {
-    let listen_addr = unsafe {
+    let _listen_addr = unsafe {
         if listen_addr.is_null() {
             eprintln!("listen_addr pointer was null");
             return false;
@@ -32,9 +33,7 @@ pub extern "C" fn mycelium_p2p_node_start(listen_addr: *const c_char) -> bool {
     }
 
     let handle = thread::spawn(move || {
-        if let Err(e) = node::start_node(listen_addr) {
-            eprintln!("Node exited with error: {:?}", e);
-        }
+        node::start_node();
     });
 
     *guard = Some(handle);
@@ -61,7 +60,7 @@ pub extern "C" fn mycelium_p2p_node_stop() -> bool {
 /// Returns a JSON string of PeerId list.
 #[no_mangle]
 pub extern "C" fn search_peers() -> *mut c_char {
-    let peers = match crate::node::search_peers() {
+    let peers = match crate::node::P2P_NODE.lock().unwrap().search_peers() {
         Ok(ids) => ids,
         Err(e) => {
             eprintln!("search_peers failed: {:?}", e);

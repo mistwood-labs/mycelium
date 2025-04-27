@@ -1,27 +1,28 @@
-use futures::StreamExt;
 use libp2p::{
     core::upgrade,
     dns::TokioDnsConfig,
-    gossipsub::{self, GossipsubEvent, IdentTopic, MessageAuthenticity},
-    identity, noise,
-    swarm::{Swarm, SwarmEvent},
-    tcp::TokioTcpConfig,
+    futures::StreamExt,
+    gossipsub::{
+        self, Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity,
+    },
+    identity,
+    mdns::{Mdns, MdnsConfig, MdnsEvent},
+    noise,
+    swarm::{Swarm, SwarmBuilder, SwarmEvent},
+    tcp::tokio::Transport as TcpTransport,
     yamux, Multiaddr, PeerId, Transport,
 };
-use libp2p::{
-    gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity},
-    identity, noise,
-    swarm::SwarmBuilder,
-    tcp::TcpConfig,
-    yamux, Multiaddr, PeerId, Swarm, Transport,
-};
+use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::error::Error;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tracing::{error, info};
+
+pub static P2P_NODE: Lazy<Mutex<P2PNode>> = Lazy::new(|| Mutex::new(P2PNode::new()));
 
 pub struct P2PNode {
     pub peer_id: PeerId,
@@ -30,7 +31,7 @@ pub struct P2PNode {
 }
 
 impl P2PNode {
-    pub fn new(port: u16) -> Self {
+    pub fn new() -> Self {
         let id_keys = identity::Keypair::generate_ed25519();
         let peer_id = PeerId::from(id_keys.public());
 
@@ -38,7 +39,7 @@ impl P2PNode {
             .into_authentic(&id_keys)
             .expect("Signing libp2p-noise static DH keypair failed.");
 
-        let transport = TokioTcpConfig::new()
+        let transport = TcpTransport::default()
             .upgrade(upgrade::Version::V1)
             .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
             .multiplex(yamux::YamuxConfig::default())
@@ -76,33 +77,40 @@ impl P2PNode {
         }
         let topic = IdentTopic::new(topic.clone());
         self.swarm.behaviour_mut().subscribe(&topic);
-        self.subscribed_topics.insert(topic.id().to_string());
+        self.subscribed_topics.insert(topic.hash().to_string());
     }
 
     pub fn get_peer_id(&self) -> String {
         self.peer_id.to_string()
     }
+
+    /// Search currently connected peers.
+    pub fn search_peers(&mut self) -> Result<Vec<String>, anyhow::Error> {
+        let peers = self
+            .swarm
+            .behaviour()
+            .all_peers()
+            .map(|(peer_id, _)| peer_id.to_string())
+            .collect();
+        Ok(peers)
+    }
 }
 
 pub fn start_node() {
     std::thread::spawn(|| {
-        // トーキオランタイムを生成
         let runtime = Runtime::new().expect("Failed to create Tokio runtime");
 
         runtime.block_on(async {
-            // 自己ID作成
             let id_keys = identity::Keypair::generate_ed25519();
             let peer_id = PeerId::from(id_keys.public());
             info!("Local peer id: {:?}", peer_id);
 
-            // トランスポート設定
-            let transport = TcpConfig::new()
+            let transport = TcpTransport::default()
                 .upgrade(upgrade::Version::V1)
                 .authenticate(noise::NoiseAuthenticated::xx(&id_keys).unwrap())
                 .multiplex(yamux::YamuxConfig::default())
                 .boxed();
 
-            // Gossipsub設定
             let gossipsub_config = GossipsubConfig::default();
             let mut gossipsub = Gossipsub::new(
                 MessageAuthenticity::Signed(id_keys.clone()),
@@ -110,45 +118,55 @@ pub fn start_node() {
             )
             .expect("Correct Gossipsub config");
 
-            // トピック登録
             let topic = IdentTopic::new("mycelium");
             gossipsub.subscribe(&topic).unwrap();
 
-            // Swarm構築
-            let mut swarm =
-                SwarmBuilder::with_tokio_executor(transport, gossipsub, peer_id).build();
+            let mdns = Mdns::new(MdnsConfig::default())
+                .await
+                .expect("Failed to create mDNS");
 
-            // 簡易イベントループ
+            let mut swarm = {
+                let behaviour =
+                    SwarmBuilder::with_tokio_executor((gossipsub, mdns), peer_id).build();
+                behaviour
+            };
+
+            // 明示的にリッスンアドレスを追加
+            swarm
+                .listen_on("/ip4/0.0.0.0/tcp/4001".parse().unwrap())
+                .expect("Failed to start listening");
+
             loop {
                 match swarm.select_next_some().await {
-                    gossipsub::GossipsubEvent::Message { message, .. } => {
+                    SwarmEvent::Behaviour((
+                        gossipsub::GossipsubEvent::Message { message, .. },
+                        _,
+                    )) => {
                         info!("Received: {:?}", String::from_utf8_lossy(&message.data));
                     }
-                    gossipsub::GossipsubEvent::Subscribed { peer_id, .. } => {
+                    SwarmEvent::Behaviour((
+                        gossipsub::GossipsubEvent::Subscribed { peer_id, .. },
+                        _,
+                    )) => {
                         info!("Peer subscribed: {:?}", peer_id);
                     }
-                    gossipsub::GossipsubEvent::Unsubscribed { peer_id, .. } => {
+                    SwarmEvent::Behaviour((
+                        gossipsub::GossipsubEvent::Unsubscribed { peer_id, .. },
+                        _,
+                    )) => {
                         info!("Peer unsubscribed: {:?}", peer_id);
+                    }
+                    SwarmEvent::Behaviour((MdnsEvent::Discovered(peers), _)) => {
+                        for (peer_id, _addr) in peers {
+                            info!("Discovered peer: {:?}", peer_id);
+                        }
+                    }
+                    SwarmEvent::NewListenAddr { address, .. } => {
+                        info!("Listening on {:?}", address);
                     }
                     _ => {}
                 }
             }
         });
     });
-}
-
-use crate::node::SWARM;
-use libp2p::gossipsub::IdentTopic;
-use std::sync::MutexGuard;
-
-/// Search currently connected peers.
-pub fn search_peers() -> Result<Vec<String>, anyhow::Error> {
-    let swarm = SWARM.lock().unwrap();
-    let peers = swarm
-        .behaviour()
-        .gossipsub()
-        .all_peers()
-        .map(|(peer_id, _)| peer_id.to_string())
-        .collect();
-    Ok(peers)
 }
