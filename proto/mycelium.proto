@@ -1,0 +1,36 @@
+syntax = "proto3";
+package mycelium;
+
+message Post {
+  string author_peer_id = 1;
+  int64 timestamp = 2;
+  bytes payload = 3;
+}
+
+message Reaction {
+  string responder_peer_id = 1;
+  bytes post_id = 2;
+  enum Type {
+    COPY = 0;
+    ECHO = 1;
+  }
+  Type kind = 3;
+  int64 timestamp = 4;
+}
+
+message SignedPost {
+  Post payload = 1;
+  bytes signature = 2; // author's ed25519 signature
+}
+
+message SignedReaction {
+  Reaction payload = 1;
+  bytes signature = 2; // responder's ed25519 signature
+}
+
+// acknowledgment for mutual authentication
+message Ack {
+  bool success = 1;
+  string message = 2;
+  bytes signature = 3;
+}
