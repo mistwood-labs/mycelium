@@ -1,2 +1,5 @@
-pub mod ffi;
-pub mod node;
+mod ffi;
+mod node;
+mod proto;
+
+pub use ffi::*;

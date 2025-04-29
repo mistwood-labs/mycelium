@@ -18,6 +18,11 @@ message Reaction {
   int64 timestamp = 4;
 }
 
+message Ack {
+    bool success = 1;
+    string message = 2;
+  }
+
 message SignedPost {
   Post payload = 1;
   bytes signature = 2; // author's ed25519 signature
@@ -29,8 +34,7 @@ message SignedReaction {
 }
 
 // acknowledgment for mutual authentication
-message Ack {
-  bool success = 1;
-  string message = 2;
-  bytes signature = 3;
+message SignedAck {
+    Ack payload = 1;
+    bytes signature = 2;
 }

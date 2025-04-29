@@ -1,21 +1,20 @@
+use crate::proto;
+use async_trait::async_trait;
+use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use libp2p::{
     futures::StreamExt,
-    gossipsub, mdns, noise,
+    gossipsub, mdns, noise, request_response,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId,
 };
-use once_cell::sync::Lazy;
+use prost::Message;
 use std::{
     collections::{hash_map::DefaultHasher, HashSet},
     error::Error,
     hash::{Hash, Hasher},
-    sync::Mutex,
     time::Duration,
 };
 use tokio::{io, runtime};
-
-pub static MY_NODE: Lazy<Mutex<MyNode>> =
-    Lazy::new(|| Mutex::new(MyNode::new().expect("Failed to create node")));
 
 pub struct MyNode {
     swarm: libp2p::Swarm<MyBehaviour>,
@@ -26,6 +25,86 @@ pub struct MyNode {
 struct MyBehaviour {
     gossipsub: gossipsub::Behaviour,
     mdns: mdns::tokio::Behaviour,
+    request_response: request_response::Behaviour<ReactionCodec>,
+}
+
+#[derive(Clone)]
+pub struct ReactionProtocol;
+
+impl AsRef<str> for ReactionProtocol {
+    fn as_ref(&self) -> &str {
+        "/mycelium/reaction/1.0.0"
+    }
+}
+
+#[derive(Clone)]
+pub struct ReactionCodec;
+
+#[async_trait]
+impl request_response::Codec for ReactionCodec {
+    type Protocol = ReactionProtocol;
+    type Request = proto::SignedReaction;
+    type Response = proto::SignedAck;
+
+    async fn read_request<T>(
+        &mut self,
+        _protocol: &ReactionProtocol,
+        io: &mut T,
+    ) -> Result<Self::Request, std::io::Error>
+    where
+        T: AsyncRead + Unpin + Send,
+    {
+        let mut buf = Vec::new();
+        io.read_to_end(&mut buf).await?;
+        proto::SignedReaction::decode(buf.as_slice())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    async fn read_response<T>(
+        &mut self,
+        _protocol: &ReactionProtocol,
+        io: &mut T,
+    ) -> Result<Self::Response, std::io::Error>
+    where
+        T: AsyncRead + Unpin + Send,
+    {
+        let mut buf = Vec::new();
+        io.read_to_end(&mut buf).await?;
+        proto::SignedAck::decode(buf.as_slice())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    async fn write_request<T>(
+        &mut self,
+        _protocol: &ReactionProtocol,
+        io: &mut T,
+        req: Self::Request,
+    ) -> Result<(), std::io::Error>
+    where
+        T: AsyncWrite + Unpin + Send,
+    {
+        let mut buf = Vec::new();
+        req.encode(&mut buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        io.write_all(&buf).await?;
+        Ok(())
+    }
+
+    async fn write_response<T>(
+        &mut self,
+        _protocol: &ReactionProtocol,
+        io: &mut T,
+        res: Self::Response,
+    ) -> Result<(), std::io::Error>
+    where
+        T: AsyncWrite + Unpin + Send,
+    {
+        let mut buf = Vec::new();
+        res.encode(&mut buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        io.write_all(&buf).await?;
+        Ok(())
+    }
 }
 
 impl MyNode {
@@ -65,7 +144,17 @@ impl MyNode {
                     key.public().to_peer_id(),
                 )?;
 
-                Ok(MyBehaviour { gossipsub, mdns })
+                let request_response = request_response::Behaviour::with_codec(
+                    ReactionCodec,
+                    [(ReactionProtocol, request_response::ProtocolSupport::Full)],
+                    request_response::Config::default(),
+                );
+
+                Ok(MyBehaviour {
+                    gossipsub,
+                    mdns,
+                    request_response,
+                })
             })?
             .build();
 
@@ -99,16 +188,38 @@ impl MyNode {
         self.dbg_topics.insert(topic.to_string());
     }
 
+    pub fn send_reaction(&mut self, peer: impl AsRef<str>, reaction_bytes: Vec<u8>) {
+        let reaction = proto::SignedReaction::decode(reaction_bytes.as_slice())
+            .expect("Failed to decode reaction");
+        let peer_id = peer.as_ref().parse().expect("Invalid peer ID");
+        self.swarm
+            .behaviour_mut()
+            .request_response
+            .send_request(&peer_id, reaction);
+    }
+
+    #[expect(dead_code)]
+    pub fn send_ack(
+        &mut self,
+        ch: request_response::ResponseChannel<proto::SignedAck>,
+        ack: proto::SignedAck,
+    ) -> Result<(), proto::SignedAck> {
+        self.swarm
+            .behaviour_mut()
+            .request_response
+            .send_response(ch, ack)
+    }
+
     pub fn local_peer_id(&self) -> &PeerId {
         self.swarm.local_peer_id()
     }
 
-    pub fn discovered_nodes(&self) -> impl Iterator<Item = &PeerId> {
-        self.swarm.behaviour().mdns.discovered_nodes()
-    }
-
     pub fn connected_peers(&self) -> impl Iterator<Item = &PeerId> {
         self.swarm.connected_peers()
+    }
+
+    pub fn discovered_nodes(&self) -> impl Iterator<Item = &PeerId> {
+        self.swarm.behaviour().mdns.discovered_nodes()
     }
 
     pub fn start(&mut self, addr: impl AsRef<str>) {
@@ -123,29 +234,34 @@ impl MyNode {
             loop {
                 tokio::select! {
                     event = self.swarm.select_next_some() => match event {
-                        SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(
-                            gossipsub::Event::Message { message, .. },
-                        )) => {
-                            println!("Received: {:?}", String::from_utf8_lossy(&message.data));
+                        SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(event)) => match event {
+                            gossipsub::Event::Message { message, .. } => println!("Received: {:?}", String::from_utf8_lossy(&message.data)),
+                            gossipsub::Event::Subscribed { peer_id, .. } => println!("Peer subscribed: {:?}", peer_id),
+                            gossipsub::Event::Unsubscribed { peer_id, .. } => println!("Peer unsubscribed: {:?}", peer_id),
+                            _ => {}
                         }
-                        SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(
-                            gossipsub::Event::Subscribed { peer_id, .. },
-                        )) => {
-                            println!("Peer subscribed: {:?}", peer_id);
-                        }
-                        SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(
-                            gossipsub::Event::Unsubscribed { peer_id, .. },
-                        )) => {
-                            println!("Peer unsubscribed: {:?}", peer_id);
-                        }
-                        SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
-                            for (peer_id, _addr) in peers {
-                                println!("Discovered peer: {:?}", peer_id);
+                        SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(event)) => match event {
+                            mdns::Event::Discovered(peers) => {
+                                for (peer_id, _addr) in peers {
+                                    println!("Discovered peer: {:?}", peer_id);
+                                }
+                            }
+                            mdns::Event::Expired(peers) => {
+                                for (peer_id, _addr) in peers {
+                                    println!("Expired peer: {:?}", peer_id);
+                                }
                             }
                         }
-                        SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Expired(peers))) => {
-                            for (peer_id, _addr) in peers {
-                                println!("Expired peer: {:?}", peer_id);
+                        SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(event)) => {
+                            match event {
+                                request_response::Event::Message { message, .. } => {
+                                    if let request_response::Message::Request { request, .. } = message {
+                                        // request: SignedReaction
+                                        // 1) verify 2) store 3) gen SignedAck 4) send_ack
+                                        println!("Reaction received: {:?}", request);
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                         SwarmEvent::NewListenAddr { address, .. } => {
