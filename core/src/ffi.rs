@@ -24,15 +24,28 @@ static TOKIO_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 ///
 /// Safe unless...
 #[no_mangle]
-pub unsafe extern "C" fn node_start(addr: *const c_char) -> c_uchar {
-    env_logger::init();
-    log::debug!("env_logger initialized");
+pub extern "C" fn node_start(addr: *const c_char) -> c_uchar {
+    // 1) Safely convert the incoming C string into an owned Rust String
+    let addr_str = unsafe {
+        if addr.is_null() {
+            return 0;
+        }
+        CStr::from_ptr(addr).to_str().unwrap_or_default().to_owned()
+    };
 
-    let res = panic::catch_unwind(|| {
-        let addr = unsafe { CStr::from_ptr(addr) }.to_str().unwrap_or_default();
-        TOKIO_RT.block_on(async { NODE.lock().await.start(addr).await.is_ok() as u8 })
+    // 2) Spawn the async start() on our existing global Tokio runtime.
+    //    This returns immediately.
+    let handle = TOKIO_RT.handle().clone();
+    handle.spawn(async move {
+        // Lock the global NODE and call start(addr_str).await
+        // Any panics will be logged but won't block the FFI thread.
+        if let Err(e) = NODE.lock().await.start(&addr_str).await {
+            log::error!("node_start failed: {}", e);
+        }
     });
-    res.unwrap_or(0)
+
+    // 3) Immediately return “true” to Dart
+    1
 }
 
 #[no_mangle]
@@ -51,7 +64,8 @@ pub extern "C" fn connected_peers() -> *mut c_char {
                 .await
                 .connected_peers()
                 .await
-                .map(ToString::to_string)
+                .into_iter()
+                .map(|peer| peer.to_string())
                 .collect()
         });
         let json = serde_json::to_string(&peers).unwrap();
@@ -68,6 +82,7 @@ pub extern "C" fn discovered_nodes() -> *mut c_char {
                 .await
                 .discovered_nodes()
                 .await
+                .into_iter()
                 .map(|peer| {
                     let s = peer.to_string();
                     log::debug!("discovered peer: {}", s);

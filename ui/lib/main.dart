@@ -6,9 +6,9 @@ import 'src/mycelium_ffi.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Start node on all interfaces
-  final started = nodeStart('/ip4/0.0.0.0/tcp/0');
-  if (!started) debugPrint('Failed to start Mycelium node');
+  print("➤ Calling nodeStart...");
+  final ok = nodeStart("/ip4/0.0.0.0/tcp/0");
+  print("➤ nodeStart returned $ok");
 
   runApp(const MyApp());
 }

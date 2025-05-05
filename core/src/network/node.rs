@@ -10,11 +10,13 @@ use std::{
     collections::{hash_map::DefaultHasher, HashSet},
     error::Error,
     hash::{Hash, Hasher},
+    sync::Arc,
     time::Duration,
 };
+use tokio::sync::Mutex as TokioMutex;
 
 pub struct MyNode {
-    swarm: libp2p::Swarm<MyBehaviour>,
+    swarm: Arc<TokioMutex<libp2p::Swarm<MyBehaviour>>>,
     dbg_topics: HashSet<String>,
 }
 
@@ -80,14 +82,14 @@ impl MyNode {
             .build();
 
         Ok(Self {
-            swarm,
+            swarm: Arc::new(TokioMutex::new(swarm)),
             dbg_topics: HashSet::new(),
         })
     }
 
     pub async fn connect_to_peer(&mut self, addr: &str) -> Result<(), Box<dyn Error>> {
         let addr: Multiaddr = addr.parse()?;
-        self.swarm.dial(addr)?;
+        self.swarm.lock().await.dial(addr)?;
         Ok(())
     }
 
@@ -100,6 +102,8 @@ impl MyNode {
         let mut post_bytes = Vec::new();
         post.encode(&mut post_bytes)?;
         self.swarm
+            .lock()
+            .await
             .behaviour_mut()
             .gossipsub
             .publish(topic, post_bytes)?;
@@ -111,7 +115,12 @@ impl MyNode {
             return Err("Already subscribed to this topic".into());
         }
         let topic = gossipsub::IdentTopic::new(topic);
-        self.swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+        self.swarm
+            .lock()
+            .await
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&topic)?;
         self.dbg_topics.insert(topic.to_string());
         Ok(())
     }
@@ -123,6 +132,8 @@ impl MyNode {
     ) -> Result<(), Box<dyn Error>> {
         let peer_id = peer.parse()?;
         self.swarm
+            .lock()
+            .await
             .behaviour_mut()
             .request_response
             .send_request(&peer_id, reaction);
@@ -135,69 +146,62 @@ impl MyNode {
         ack: proto::SignedAck,
     ) -> Result<(), proto::SignedAck> {
         self.swarm
+            .lock()
+            .await
             .behaviour_mut()
             .request_response
             .send_response(ch, ack)
     }
 
-    pub async fn local_peer_id(&self) -> &PeerId {
-        self.swarm.local_peer_id()
+    pub async fn local_peer_id(&self) -> PeerId {
+        self.swarm.lock().await.local_peer_id().clone()
     }
 
-    pub async fn connected_peers(&self) -> impl Iterator<Item = &PeerId> {
-        self.swarm.connected_peers()
+    pub async fn connected_peers(&self) -> Vec<PeerId> {
+        self.swarm.lock().await.connected_peers().cloned().collect()
     }
 
-    pub async fn discovered_nodes(&self) -> impl Iterator<Item = &PeerId> {
-        self.swarm.behaviour().mdns.discovered_nodes()
+    pub async fn discovered_nodes(&self) -> Vec<PeerId> {
+        self.swarm
+            .lock()
+            .await
+            .behaviour()
+            .mdns
+            .discovered_nodes()
+            .cloned()
+            .collect()
     }
 
     pub async fn start(&mut self, addr: &str) -> Result<(), Box<dyn Error>> {
-        let addr: Multiaddr = addr.parse().expect("Invalid multiaddr");
-        let runtime = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+        let addr: Multiaddr = addr.parse()?;
+        self.swarm.lock().await.listen_on(addr.clone())?;
+        log::debug!("MyNode listening on {}", addr);
 
-        runtime.block_on(async {
-            self.swarm
-                .listen_on(addr)
-                .expect("Failed to start listening");
-
-            log::debug!("Spawning Swarm event loop");
-
+        let swarm_handle = Arc::clone(&self.swarm);
+        tokio::spawn(async move {
+            let mut swarm = swarm_handle.lock().await;
             loop {
-                tokio::select! {
-                    event = self.swarm.select_next_some() => match event {
-                        SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(event)) => match event {
-                            gossipsub::Event::Message { message, .. } => println!("Received: {:?}", String::from_utf8_lossy(&message.data)),
-                            gossipsub::Event::Subscribed { peer_id, .. } => println!("Peer subscribed: {:?}", peer_id),
-                            gossipsub::Event::Unsubscribed { peer_id, .. } => println!("Peer unsubscribed: {:?}", peer_id),
-                            _ => {}
-                        }
-                        SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(event)) => match event {
-                            mdns::Event::Discovered(peers) => {
-                                for (peer_id, _addr) in peers {
-                                    println!("Discovered peer: {:?}", peer_id);
-                                }
-                            }
-                            mdns::Event::Expired(peers) => {
-                                for (peer_id, _addr) in peers {
-                                    println!("Expired peer: {:?}", peer_id);
-                                }
-                            }
-                        }
-                        SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { message: request_response::Message::Request { request, .. }, .. })) => {
-                            // request: SignedReaction
-                            // 1) verify 2) store 3) gen SignedAck 4) send_ack
-                            println!("Reaction received: {:?}", request);
-                        }
-                        SwarmEvent::NewListenAddr { address, .. } => {
-                            println!("Listening on {:?}", address);
-                        }
-                        _ => {}
+                match swarm.select_next_some().await {
+                    SwarmEvent::Behaviour(MyBehaviourEvent::Gossipsub(evt)) => {
+                        log::debug!("Gossipsub event: {:?}", evt);
+                    }
+                    SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(evt)) => {
+                        log::debug!("mDNS event: {:?}", evt);
+                    }
+                    SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(evt)) => {
+                        log::debug!("RequestResponse event: {:?}", evt);
+                    }
+                    SwarmEvent::NewListenAddr { address, .. } => {
+                        log::debug!("New listen addr: {:?}", address);
+                    }
+                    other => {
+                        log::trace!("Other event: {:?}", other);
                     }
                 }
             }
         });
 
+        // 3) return immediately so the FFI call completes
         Ok(())
     }
 
