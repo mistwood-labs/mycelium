@@ -161,6 +161,8 @@ impl MyNode {
                 .listen_on(addr)
                 .expect("Failed to start listening");
 
+            log::debug!("Spawning Swarm event loop");
+
             loop {
                 tokio::select! {
                     event = self.swarm.select_next_some() => match event {

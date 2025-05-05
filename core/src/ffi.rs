@@ -25,6 +25,9 @@ static TOKIO_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 /// Safe unless...
 #[no_mangle]
 pub unsafe extern "C" fn node_start(addr: *const c_char) -> c_uchar {
+    env_logger::init();
+    log::debug!("env_logger initialized");
+
     let res = panic::catch_unwind(|| {
         let addr = unsafe { CStr::from_ptr(addr) }.to_str().unwrap_or_default();
         TOKIO_RT.block_on(async { NODE.lock().await.start(addr).await.is_ok() as u8 })
@@ -65,13 +68,20 @@ pub extern "C" fn discovered_nodes() -> *mut c_char {
                 .await
                 .discovered_nodes()
                 .await
-                .map(ToString::to_string)
+                .map(|peer| {
+                    let s = peer.to_string();
+                    log::debug!("discovered peer: {}", s);
+                    s
+                })
                 .collect()
         });
         let json = serde_json::to_string(&peers).unwrap();
         CString::new(json).unwrap().into_raw()
     });
-    res.unwrap_or(std::ptr::null_mut())
+    res.unwrap_or_else(|e| {
+        eprintln!("FFI discovered_nodes panic: {:?}", e);
+        std::ptr::null_mut()
+    })
 }
 
 /// # Safety

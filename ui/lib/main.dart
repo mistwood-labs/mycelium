@@ -1,34 +1,30 @@
+// ui/lib/main.dart
+
 import 'package:flutter/material.dart';
 import 'src/mycelium_ffi.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Start the node on all interfaces (auto-select port)
+  // Start node on all interfaces
   final started = nodeStart('/ip4/0.0.0.0/tcp/0');
-  if (!started) {
-    debugPrint('Failed to start Mycelium node');
-  }
+  if (!started) debugPrint('Failed to start Mycelium node');
 
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Mycelium Client',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      home: const PeerPage(),
-    );
-  }
+  Widget build(BuildContext context) => MaterialApp(
+        title: 'Mycelium Client',
+        theme: ThemeData(primarySwatch: Colors.blue),
+        home: const PeerPage(),
+      );
 }
 
 class PeerPage extends StatefulWidget {
   const PeerPage({super.key});
-
   @override
   State<PeerPage> createState() => _PeerPageState();
 }
@@ -44,16 +40,14 @@ class _PeerPageState extends State<PeerPage> {
   }
 
   void _refreshPeers() {
-    setState(() {
-      _peers = connectedPeers();
-    });
+    setState(() => _peers = connectedPeers());
   }
 
   void _discoverPeers() {
+    print('🔍 [UI] Discover button pressed');
     final discovered = discoveredNodes();
-    setState(() {
-      _peers = discovered;
-    });
+    print('🔍 [UI] discoveredNodes returned ${discovered.length} peers');
+    setState(() => _peers = discovered);
   }
 
   void _connectPeer() {
@@ -64,14 +58,12 @@ class _PeerPageState extends State<PeerPage> {
       );
       return;
     }
-    print('🔌 [UI] Connect button pressed, addr="$addr"');
+    print('🔌 [UI] Connect to $addr');
     final success = connectToPeer(addr);
     print('🔌 [UI] connectToPeer returned $success');
     if (success) {
-      print('🔌 [UI] refreshing peers…');
-      setState(() => _peers = connectedPeers());
+      _refreshPeers();
     } else {
-      print('🔌 [UI] connectToPeer failed');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to connect to $addr')),
       );
@@ -80,9 +72,7 @@ class _PeerPageState extends State<PeerPage> {
 
   void _stopNode() {
     final stopped = nodeStop();
-    if (!stopped) {
-      debugPrint('Failed to stop Mycelium node');
-    }
+    if (!stopped) debugPrint('Failed to stop Mycelium node');
   }
 
   @override
@@ -104,7 +94,7 @@ class _PeerPageState extends State<PeerPage> {
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             TextField(
@@ -115,17 +105,12 @@ class _PeerPageState extends State<PeerPage> {
               ),
             ),
             const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: _connectPeer,
-              child: const Text('Connect'),
-            ),
+            ElevatedButton(onPressed: _connectPeer, child: const Text('Connect')),
             const SizedBox(height: 16),
             Expanded(
               child: ListView.builder(
                 itemCount: _peers.length,
-                itemBuilder: (context, index) => ListTile(
-                  title: Text(_peers[index]),
-                ),
+                itemBuilder: (_, i) => ListTile(title: Text(_peers[i])),
               ),
             ),
           ],

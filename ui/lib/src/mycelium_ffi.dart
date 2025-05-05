@@ -4,23 +4,21 @@ import 'package:ffi/ffi.dart';
 import 'dart:convert';
 
 /// Load the native Mycelium library for the current platform
-DynamicLibrary _openMyceliumLib() {
+DynamicLibrary _openLib() {
   if (Platform.isLinux) return DynamicLibrary.open('/home/s8sato/git/works/mycelium/ui/lib/generated/libmycelium_core.so');
   if (Platform.isMacOS) return DynamicLibrary.open('libmycelium.dylib');
   return DynamicLibrary.open('mycelium.dll');
 }
 
-final DynamicLibrary _lib = _openMyceliumLib();
+final DynamicLibrary _lib = _openLib();
 
 // ----- FFI type definitions and bindings -----
 
 // node_start: initialize and start the P2P node
-// Signature: Pointer<Utf8> -> Uint8
 typedef _node_start_native = Uint8 Function(Pointer<Utf8>);
 typedef _NodeStart = int Function(Pointer<Utf8>);
-final _NodeStart _nodeStart = _lib
-  .lookup<NativeFunction<_node_start_native>>('node_start')
-  .asFunction();
+final _NodeStart _nodeStart =
+    _lib.lookup<NativeFunction<_node_start_native>>('node_start').asFunction();
 
 /// Starts the node listening on the given multiaddr. Returns true on success.
 bool nodeStart(String addr) {
@@ -33,9 +31,8 @@ bool nodeStart(String addr) {
 // node_stop: stop the P2P node
 typedef _node_stop_native = Uint8 Function();
 typedef _NodeStop = int Function();
-final _NodeStop _nodeStop = _lib
-  .lookup<NativeFunction<_node_stop_native>>('node_stop')
-  .asFunction();
+final _NodeStop _nodeStop =
+    _lib.lookup<NativeFunction<_node_stop_native>>('node_stop').asFunction();
 
 /// Stops the node. Returns true on success.
 bool nodeStop() => _nodeStop() != 0;
@@ -43,9 +40,10 @@ bool nodeStop() => _nodeStop() != 0;
 // connected_peers: get JSON-encoded list of peers
 typedef _connected_peers_native = Pointer<Utf8> Function();
 typedef _ConnectedPeers = Pointer<Utf8> Function();
-final _ConnectedPeers _connectedPeers = _lib
-  .lookup<NativeFunction<_connected_peers_native>>('connected_peers')
-  .asFunction();
+final _ConnectedPeers _connectedPeers =
+    _lib
+        .lookup<NativeFunction<_connected_peers_native>>('connected_peers')
+        .asFunction();
 
 /// Retrieves the list of connected peers.
 List<String> connectedPeers() {
@@ -58,24 +56,26 @@ List<String> connectedPeers() {
 // discovered_nodes: mDNS-based peer discovery
 typedef _discovered_nodes_native = Pointer<Utf8> Function();
 typedef _DiscoveredNodes = Pointer<Utf8> Function();
-final _DiscoveredNodes _discoveredNodes = _lib
-  .lookup<NativeFunction<_discovered_nodes_native>>('discovered_nodes')
-  .asFunction();
+final _DiscoveredNodes _discoveredNodes =
+    _lib
+        .lookup<NativeFunction<_discovered_nodes_native>>('discovered_nodes')
+        .asFunction();
 
-/// Discovers local peers via mDNS.
+/// Discovers local peers via mDNS; returns PeerId.to_string() list.
 List<String> discoveredNodes() {
   final ptr = _discoveredNodes();
   final jsonStr = ptr.toDartString();
   calloc.free(ptr);
-  return List<String>.from(json.decode(jsonStr));
+  return (json.decode(jsonStr) as List).cast<String>();
 }
 
 // connect_to_peer: dial a peer address
 typedef _connect_to_peer_native = Uint8 Function(Pointer<Utf8>);
 typedef _ConnectToPeer = int Function(Pointer<Utf8>);
-final _ConnectToPeer _connectToPeer = _lib
-  .lookup<NativeFunction<_connect_to_peer_native>>('connect_to_peer')
-  .asFunction();
+final _ConnectToPeer _connectToPeer =
+    _lib
+        .lookup<NativeFunction<_connect_to_peer_native>>('connect_to_peer')
+        .asFunction();
 
 /// Connects to the given multiaddr. Returns true on success.
 bool connectToPeer(String addr) {
@@ -86,15 +86,13 @@ bool connectToPeer(String addr) {
 }
 
 // publish_post: publish a SignedPost message
-typedef _publish_post_native = Uint8 Function(
-  Pointer<Utf8>, Pointer<Uint8>, Uint64
-);
-typedef _PublishPost = int Function(
-  Pointer<Utf8>, Pointer<Uint8>, int
-);
-final _PublishPost _publishPost = _lib
-  .lookup<NativeFunction<_publish_post_native>>('publish_post')
-  .asFunction();
+typedef _publish_post_native =
+    Uint8 Function(Pointer<Utf8>, Pointer<Uint8>, Uint64);
+typedef _PublishPost = int Function(Pointer<Utf8>, Pointer<Uint8>, int);
+final _PublishPost _publishPost =
+    _lib
+        .lookup<NativeFunction<_publish_post_native>>('publish_post')
+        .asFunction();
 
 /// Publishes a SignedPost to the given topic.
 bool publishPost(String topic, List<int> signedPostBytes) {
@@ -111,9 +109,10 @@ bool publishPost(String topic, List<int> signedPostBytes) {
 // subscribe_topic: subscribe to a topic
 typedef _subscribe_topic_native = Uint8 Function(Pointer<Utf8>);
 typedef _SubscribeTopic = int Function(Pointer<Utf8>);
-final _SubscribeTopic _subscribeTopic = _lib
-  .lookup<NativeFunction<_subscribe_topic_native>>('subscribe_topic')
-  .asFunction();
+final _SubscribeTopic _subscribeTopic =
+    _lib
+        .lookup<NativeFunction<_subscribe_topic_native>>('subscribe_topic')
+        .asFunction();
 
 /// Subscribes to the specified topic. Returns true on success.
 bool subscribeTopic(String topic) {
@@ -124,15 +123,13 @@ bool subscribeTopic(String topic) {
 }
 
 // send_reaction: send a SignedReaction message
-typedef _send_reaction_native = Uint8 Function(
-  Pointer<Utf8>, Pointer<Uint8>, Uint64
-);
-typedef _SendReaction = int Function(
-  Pointer<Utf8>, Pointer<Uint8>, int
-);
-final _SendReaction _sendReaction = _lib
-  .lookup<NativeFunction<_send_reaction_native>>('send_reaction')
-  .asFunction();
+typedef _send_reaction_native =
+    Uint8 Function(Pointer<Utf8>, Pointer<Uint8>, Uint64);
+typedef _SendReaction = int Function(Pointer<Utf8>, Pointer<Uint8>, int);
+final _SendReaction _sendReaction =
+    _lib
+        .lookup<NativeFunction<_send_reaction_native>>('send_reaction')
+        .asFunction();
 
 /// Sends a SignedReaction to a peer. Returns true on success.
 bool sendReaction(String peer, List<int> signedReactionBytes) {
