@@ -1,40 +1,78 @@
 syntax = "proto3";
 package mycelium;
 
+// === Control Messages ===
+
+// Instruct a node to start
+message NodeStartRequest {}
+message NodeStartResponse {
+  bool success = 1;
+}
+
+// Instruct a node to stop
+message NodeStopRequest {}
+message NodeStopResponse {
+  bool success = 1;
+}
+
+// Peer discovery via mDNS
+message DiscoverRequest {}
+message DiscoverResponse {
+  repeated string peers = 1;
+}
+
+// Dial/connect to a peer
+message ConnectRequest {
+  string address = 1;
+}
+message ConnectResponse {
+  bool success = 1;
+}
+
+// List currently connected peers
+message PeerList {
+  repeated string peers = 1;
+}
+
+// === Application Messages ===
+
+// A user’s content post
 message Post {
-  string author_peer_id = 1;
-  int64 timestamp = 2;
-  bytes payload = 3;
+  string id        = 1; // UUID or unique message identifier
+  string author    = 2; // author’s user ID
+  string content   = 3; // text body
+  int64  timestamp = 4; // UNIX epoch millis
 }
 
+// A reaction (copy/echo) to a post
 message Reaction {
-  string responder_peer_id = 1;
-  bytes post_id = 2;
-  enum Type {
-    COPY = 0;
-    ECHO = 1;
-  }
-  Type kind = 3;
-  int64 timestamp = 4;
+  string post_id   = 1; // ID of the Post being reacted to
+  string reactor   = 2; // reactor’s user ID
+  string reaction  = 3; // e.g. “like”, “👍”
+  int64  timestamp = 4;
 }
 
+// An acknowledgement of receipt
 message Ack {
-    bool success = 1;
-    string message = 2;
-  }
+  string message_id = 1; // ID of the message being acknowledged
+  string from       = 2; // acknowledging peer/user
+  int64  timestamp  = 3;
+}
 
+// === Signed Variants ===
+
+// Carry the original message plus a digital signature
 message SignedPost {
-  Post payload = 1;
-  bytes signature = 2; // author's ed25519 signature
+  Post  post      = 1;
+  bytes signature = 2;
 }
 
 message SignedReaction {
-  Reaction payload = 1;
-  bytes signature = 2; // responder's ed25519 signature
+  Reaction reaction = 1;
+  bytes    signature = 2;
 }
 
-// acknowledgment for mutual authentication
 message SignedAck {
-    Ack payload = 1;
-    bytes signature = 2;
+  Ack    ack       = 1;
+  bytes  signature = 2;
 }

@@ -1,1 +1,29 @@
+# Rust target directory
+/core/target/
+**/target/
+
+# Generated proto code
+/core/src/proto/
+/ui/lib/generated/
+
+# Cargo build artifacts
+**/Cargo.lock
+
+# macOS
+*.DS_Store
+
+# Flutter and Dart
+/ios/Pods/
+/.dart_tool/
+/build/
+**/pubspec.lock
+
+# VS Code
+.vscode/
+
+# JetBrains
+.idea/
+
+# Misc
+*.log
 _*
