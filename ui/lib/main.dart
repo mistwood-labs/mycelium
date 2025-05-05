@@ -57,15 +57,21 @@ class _PeerPageState extends State<PeerPage> {
   }
 
   void _connectPeer() {
-    final addr = _addrController.text;
-    debugPrint('Attempting to connect to $addr');
+    final addr = _addrController.text.trim();
+    if (addr.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a peer multiaddr')),
+      );
+      return;
+    }
+    print('🔌 [UI] Connect button pressed, addr="$addr"');
     final success = connectToPeer(addr);
-    debugPrint('connectToPeer returned $success');
+    print('🔌 [UI] connectToPeer returned $success');
     if (success) {
-      debugPrint('Connection successful, refreshing peers');
-      _refreshPeers();
+      print('🔌 [UI] refreshing peers…');
+      setState(() => _peers = connectedPeers());
     } else {
-      debugPrint('Connection failed');
+      print('🔌 [UI] connectToPeer failed');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to connect to $addr')),
       );
