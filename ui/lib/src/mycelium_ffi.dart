@@ -5,7 +5,10 @@ import 'dart:convert';
 
 /// Load the native Mycelium library for the current platform
 DynamicLibrary _openLib() {
-  if (Platform.isLinux) return DynamicLibrary.open('/home/s8sato/git/works/mycelium/ui/lib/generated/libmycelium_core.so');
+  if (Platform.isLinux)
+    return DynamicLibrary.open(
+      '/home/s8sato/git/works/mycelium/ui/lib/generated/libmycelium_core.so',
+    );
   if (Platform.isMacOS) return DynamicLibrary.open('libmycelium.dylib');
   return DynamicLibrary.open('mycelium.dll');
 }
