@@ -2,9 +2,9 @@
 /core/target/
 **/target/
 
-# Generated proto code
-/core/src/proto/
-/ui/lib/generated/
+# Generated flutter_rust_bridge_codegen code
+**/frb_generated.*
+/ui/lib/src/rust/
 
 # Cargo build artifacts
 **/Cargo.lock
